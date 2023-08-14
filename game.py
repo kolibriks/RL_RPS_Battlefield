@@ -1,6 +1,7 @@
 import streamlit as st
 import numpy as np
 from PIL import Image
+from scipy.spatial import KDTree
 
 
 # size of the board
@@ -11,6 +12,10 @@ NUM_OBJECTS = 10
 OBJECT_SIZE = 20
 # symbols for the objects
 symbols = ['rock', 'paper', 'scissor']
+# interaction dictionary
+interaction_dict = {'rock': 'scissor', 'scissor': 'paper', 'paper': 'rock'}
+# Preload images
+image_dict = {symbol: Image.open(f'images/{symbol}.png').resize((OBJECT_SIZE, OBJECT_SIZE)) for symbol in symbols}
 
 
 class GameObject:
@@ -18,7 +23,7 @@ class GameObject:
         self.x = x
         self.y = y
         self.type = symbol
-        self.image = self.image = Image.open(f'images/{symbol}.png').resize((OBJECT_SIZE, OBJECT_SIZE))
+        self.image = image_dict[symbol]
 
     def move(self, dx, dy):
         self.x = max(OBJECT_SIZE, min(WIDTH - OBJECT_SIZE, self.x + dx))
@@ -38,11 +43,7 @@ class GameObject:
 
 
     def interact_with(self, other):
-        if self.type == 'rock' and other.type == 'scissor':
-            return other
-        if self.type == 'scissor' and other.type == 'paper':
-            return other
-        if self.type == 'paper' and other.type == 'rock':
+        if interaction_dict[self.type] == other.type:  # Use dictionary to determine interaction
             return other
         return None  # No interaction
 
@@ -73,7 +74,7 @@ def simulate_game():
 
     session_state = st.session_state
     session_state.running = False
-    movement_mode = st.radio("Select Movement Mode:", ("Random Mode", "Hunter Mode"))
+    movement_mode = st.radio("Select Movement Mode:", ("Random Mode", "Hunter Mode", "Advanced Hunter Mode"))
     transform_mode = st.checkbox("Object changes class when it loses", value=True)
 
     if st.button("Start"):
@@ -88,18 +89,58 @@ def simulate_game():
             if movement_mode == "Random Mode":
                 obj1.move(np.random.randint(-1, 2), np.random.randint(-1, 2))
             elif movement_mode == "Hunter Mode":
-                closest_target = None
-                min_dist = np.inf
-                for obj2 in objects:
-                    if obj1 != obj2 and obj1.interact_with(obj2):
-                        dist = (obj1.x - obj2.x) ** 2 + (obj1.y - obj2.y) ** 2
-                        if dist < min_dist:
-                            min_dist = dist
-                            closest_target = obj2
-                if closest_target:
+                targets = [obj for obj in objects if obj.type == interaction_dict[obj1.type]]
+                if targets:
+                    target_coords = [(obj.x, obj.y) for obj in targets]
+                    kd_tree = KDTree(target_coords)  # Rebuild KD-tree
+
+                    dist, index = kd_tree.query((obj1.x, obj1.y))  # Find nearest target
+                    closest_target = targets[index]
                     dy = np.sign(closest_target.y - obj1.y)
                     dx = np.sign(closest_target.x - obj1.x)
                     obj1.move(dx, dy)
+            elif movement_mode == "Advanced Hunter Mode":
+                target_coords = [(obj.x, obj.y) for obj in objects]
+                kd_tree = KDTree(target_coords)  # Build KD-tree for all objects
+
+                dists, indices = kd_tree.query((obj1.x, obj1.y), k=len(objects))  # Find distances to all objects
+                dist_kill, dist_avoid = np.inf, np.inf
+                closest_target_to_kill = None
+                closest_target_to_avoid = None
+
+                for dist, index in zip(dists, indices):
+                    obj2 = objects[index]
+                    if obj2 != obj1:
+                        if obj2.type == interaction_dict[obj1.type] and dist < dist_kill:
+                            dist_kill = dist
+                            closest_target_to_kill = obj2
+                        elif interaction_dict[obj2.type] == obj1.type and dist < dist_avoid:
+                            dist_avoid = dist
+                            closest_target_to_avoid = obj2
+
+                if dist_kill < dist_avoid or (dist_kill == dist_avoid and dist_kill < np.inf):
+                    dy = np.sign(closest_target_to_kill.y - obj1.y)
+                    dx = np.sign(closest_target_to_kill.x - obj1.x)
+                elif dist_avoid < np.inf:
+                    dy = -np.sign(closest_target_to_avoid.y - obj1.y)
+                    dx = -np.sign(closest_target_to_avoid.x - obj1.x)
+                else:
+                    dx, dy = 0, 0
+
+                # Check if the object would move into a wall, and if so, try to move in a different direction
+                new_x = obj1.x + dx
+                new_y = obj1.y + dy
+
+                if new_x < OBJECT_SIZE or new_x > WIDTH - OBJECT_SIZE:
+                    dx = 0
+                    dy = np.sign(dy) if dy != 0 else np.random.choice([-1, 1])
+
+                if new_y < OBJECT_SIZE or new_y > HEIGHT - OBJECT_SIZE:
+                    dy = 0
+                    dx = np.sign(dx) if dx != 0 else np.random.choice([-1, 1])
+                obj1.move(dx, dy)
+
+            # check if objects are close enough to interact
             for obj2 in objects:
                 if obj1 != obj2 and obj1.iou(obj2) > 0.3:
                     eaten_obj = obj1.interact_with(obj2)
