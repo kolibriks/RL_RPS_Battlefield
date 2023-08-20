@@ -68,6 +68,27 @@ def draw_objects(objects):
     return image
 
 
+def is_near_wall(x, y):
+    return x < 0, x > WIDTH - OBJECT_SIZE, y < 0, y > HEIGHT - OBJECT_SIZE
+
+
+def safe_move_direction(obj1, kd_tree, objects, banned_directions=[]):
+    # Check all possible directions
+    directions = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+    for direction in directions:
+        if direction in banned_directions:
+            continue
+        dx, dy = direction
+        next_x, next_y = obj1.x + dx, obj1.y + dy
+        dists, indices = kd_tree.query((next_x, next_y), k=2)  # k=2 because the closest object might be obj1 itself
+        closest_obj = objects[indices[0]] if objects[indices[0]] != obj1 else objects[indices[1]]
+
+        # Check if moving in this direction is safe
+        if closest_obj.type != interaction_dict[obj1.type]:
+            return dx, dy
+    return 0, 0  # If no safe move, don't move
+
+
 def simulate_game():
     objects = create_objects()
     image_container = st.empty()
@@ -88,18 +109,7 @@ def simulate_game():
         for obj1 in objects:
             if movement_mode == "Random Mode":
                 obj1.move(np.random.randint(-1, 2), np.random.randint(-1, 2))
-            elif movement_mode == "Hunter Mode":
-                targets = [obj for obj in objects if obj.type == interaction_dict[obj1.type]]
-                if targets:
-                    target_coords = [(obj.x, obj.y) for obj in targets]
-                    kd_tree = KDTree(target_coords)  # Rebuild KD-tree
-
-                    dist, index = kd_tree.query((obj1.x, obj1.y))  # Find nearest target
-                    closest_target = targets[index]
-                    dy = np.sign(closest_target.y - obj1.y)
-                    dx = np.sign(closest_target.x - obj1.x)
-                    obj1.move(dx, dy)
-            elif movement_mode == "Advanced Hunter Mode":
+            else:
                 target_coords = [(obj.x, obj.y) for obj in objects]
                 kd_tree = KDTree(target_coords)  # Build KD-tree for all objects
 
@@ -118,27 +128,37 @@ def simulate_game():
                             dist_avoid = dist
                             closest_target_to_avoid = obj2
 
-                if dist_kill < dist_avoid or (dist_kill == dist_avoid and dist_kill < np.inf):
-                    dy = np.sign(closest_target_to_kill.y - obj1.y)
-                    dx = np.sign(closest_target_to_kill.x - obj1.x)
-                elif dist_avoid < np.inf:
-                    dy = -np.sign(closest_target_to_avoid.y - obj1.y)
-                    dx = -np.sign(closest_target_to_avoid.x - obj1.x)
-                else:
-                    dx, dy = 0, 0
+                if movement_mode == "Hunter Mode":
+                    if closest_target_to_kill:
+                        dy = np.sign(closest_target_to_kill.y - obj1.y)
+                        dx = np.sign(closest_target_to_kill.x - obj1.x)
+                        obj1.move(dx, dy)
+                elif movement_mode == "Advanced Hunter Mode":
+                    if dist_kill < dist_avoid or (dist_kill == dist_avoid and dist_kill < np.inf):
+                        dy = np.sign(closest_target_to_kill.y - obj1.y)
+                        dx = np.sign(closest_target_to_kill.x - obj1.x)
+                    elif dist_avoid < np.inf:
+                        dy = -np.sign(closest_target_to_avoid.y - obj1.y)
+                        dx = -np.sign(closest_target_to_avoid.x - obj1.x)
+                    else:
+                        dx, dy = 0, 0
 
-                # Check if the object would move into a wall, and if so, try to move in a different direction
-                new_x = obj1.x + dx
-                new_y = obj1.y + dy
-
-                if new_x < OBJECT_SIZE or new_x > WIDTH - OBJECT_SIZE:
-                    dx = 0
-                    dy = np.sign(dy) if dy != 0 else np.random.choice([-1, 1])
-
-                if new_y < OBJECT_SIZE or new_y > HEIGHT - OBJECT_SIZE:
-                    dy = 0
-                    dx = np.sign(dx) if dx != 0 else np.random.choice([-1, 1])
-                obj1.move(dx, dy)
+                    # Check if the object would move into a wall, and if so, try to move in a different direction
+                    new_x = obj1.x + dx
+                    new_y = obj1.y + dy
+                    near_left_wall, near_right_wall, near_top_wall, near_bottom_wall = is_near_wall(new_x, new_y)
+                    if near_left_wall or near_right_wall or near_top_wall or near_bottom_wall:
+                        banned_directions = []
+                        if near_left_wall:
+                            banned_directions.append((-1, 0))
+                        if near_right_wall:
+                            banned_directions.append((1, 0))
+                        if near_top_wall:
+                            banned_directions.append((0, -1))
+                        if near_bottom_wall:
+                            banned_directions.append((0, 1))
+                        dx, dy = safe_move_direction(obj1, kd_tree, objects, banned_directions)
+                    obj1.move(dx, dy)
 
             # check if objects are close enough to interact
             for obj2 in objects:
