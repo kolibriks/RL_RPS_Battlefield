@@ -26,8 +26,8 @@ class GameObject:
         self.image = image_dict[symbol]
 
     def move(self, dx, dy):
-        self.x = max(OBJECT_SIZE, min(WIDTH - OBJECT_SIZE, self.x + dx))
-        self.y = max(OBJECT_SIZE, min(HEIGHT - OBJECT_SIZE, self.y + dy))
+        self.x = max(0, min(WIDTH - OBJECT_SIZE, self.x + dx))
+        self.y = max(0, min(HEIGHT - OBJECT_SIZE, self.y + dy))
 
     def iou(self, other):
         x1 = max(self.x, other.x)
