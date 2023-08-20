@@ -29,7 +29,6 @@ class GameObject:
         self.x = max(OBJECT_SIZE, min(WIDTH - OBJECT_SIZE, self.x + dx))
         self.y = max(OBJECT_SIZE, min(HEIGHT - OBJECT_SIZE, self.y + dy))
 
-
     def iou(self, other):
         x1 = max(self.x, other.x)
         y1 = max(self.y, other.y)
@@ -41,7 +40,6 @@ class GameObject:
 
         return intersection / union if union > 0 else 0
 
-
     def interact_with(self, other):
         if interaction_dict[self.type] == other.type:  # Use dictionary to determine interaction
             return other
@@ -50,13 +48,9 @@ class GameObject:
 
 def create_objects():
     """Create a board with random objects."""
-    objects = []
-    for obj in symbols:
-        for i in range(NUM_OBJECTS):
-            x, y = np.random.randint(0 + OBJECT_SIZE, WIDTH - OBJECT_SIZE), \
-                np.random.randint(0 + OBJECT_SIZE, HEIGHT - OBJECT_SIZE)
-            objects.append(GameObject(x, y, obj))
-    return objects
+    x_coords = np.random.randint(OBJECT_SIZE, WIDTH - OBJECT_SIZE, len(symbols) * NUM_OBJECTS)
+    y_coords = np.random.randint(OBJECT_SIZE, HEIGHT - OBJECT_SIZE, len(symbols) * NUM_OBJECTS)
+    return [GameObject(x, y, symbol) for x, y, symbol in zip(x_coords, y_coords, np.repeat(symbols, NUM_OBJECTS))]
 
 
 def draw_objects(objects):
@@ -72,20 +66,31 @@ def is_near_wall(x, y):
     return x < 0, x > WIDTH - OBJECT_SIZE, y < 0, y > HEIGHT - OBJECT_SIZE
 
 
-def safe_move_direction(obj1, kd_tree, objects, banned_directions=[]):
+def safe_move_direction(obj1, kd_tree, objects, banned_directions=None):
     # Check all possible directions
-    directions = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+    # dictionary with distances as keys and directions as values
+    if banned_directions is None:
+        banned_directions = []
+    distances = {}
+    directions = [(1, 0), (-1, 0), (0, 1), (0, -1), (-1, -1), (-1, 1), (1, -1), (1, 1)]
     for direction in directions:
         if direction in banned_directions:
             continue
+        min_dist = np.inf
         dx, dy = direction
         next_x, next_y = obj1.x + dx, obj1.y + dy
         dists, indices = kd_tree.query((next_x, next_y), k=2)  # k=2 because the closest object might be obj1 itself
-        closest_obj = objects[indices[0]] if objects[indices[0]] != obj1 else objects[indices[1]]
+        for dist, index in zip(dists, indices):
+            obj2 = objects[index]
+            if interaction_dict[obj2.type] == obj1.type and dist < min_dist:
+                min_dist = dist
+        if min_dist < np.inf and min_dist not in distances.keys():
+            distances[min_dist] = direction
 
-        # Check if moving in this direction is safe
-        if closest_obj.type != interaction_dict[obj1.type]:
-            return dx, dy
+    if distances:
+        max_dist = max(distances.keys())
+        dx, dy = distances[max_dist]
+        return dx, dy
     return 0, 0  # If no safe move, don't move
 
 
@@ -106,13 +111,12 @@ def simulate_game():
 
     while session_state.running:
         objects_to_remove = {}
+        target_coords = [(obj.x, obj.y) for obj in objects]
+        kd_tree = KDTree(target_coords)  # Build KD-tree for all objects
         for obj1 in objects:
             if movement_mode == "Random Mode":
                 obj1.move(np.random.randint(-1, 2), np.random.randint(-1, 2))
             else:
-                target_coords = [(obj.x, obj.y) for obj in objects]
-                kd_tree = KDTree(target_coords)  # Build KD-tree for all objects
-
                 dists, indices = kd_tree.query((obj1.x, obj1.y), k=len(objects))  # Find distances to all objects
                 dist_kill, dist_avoid = np.inf, np.inf
                 closest_target_to_kill = None
@@ -169,7 +173,7 @@ def simulate_game():
         for obj in objects_to_remove.keys():
             if transform_mode:
                 obj.type = objects_to_remove[obj]
-                obj.image = Image.open(f'images/{obj.type}.png').resize((OBJECT_SIZE, OBJECT_SIZE))
+                obj.image = image_dict[obj.type]
             else:
                 objects.remove(obj)
         image = draw_objects(objects)
