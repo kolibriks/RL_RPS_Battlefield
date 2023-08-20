@@ -1,5 +1,6 @@
 import streamlit as st
 import numpy as np
+import time
 from PIL import Image
 from scipy.spatial import KDTree
 
@@ -201,11 +202,15 @@ def interact_objects(objects, transform_mode, kd_tree):
 def simulate_game():
     objects = create_objects()
     image_container = st.empty()
+    fps_placeholder = st.empty()
+    fps_placeholder.text(f"Current FPS: 0.00")
+    last_time = time.time()
 
     session_state = st.session_state
     session_state.running = False
     movement_mode = st.radio("Select Movement Mode:", ("Random Mode", "Hunter Mode", "Advanced Hunter Mode"))
     transform_mode = st.checkbox("Object changes class when it loses", value=True)
+    desired_fps = st.slider("Select FPS", 1, 60, 30)  # Slider to select FPS
 
     if st.button("Start"):
         session_state.running = True
@@ -214,6 +219,7 @@ def simulate_game():
         session_state.running = False
 
     while session_state.running:
+        start_time = time.time()
         target_coords = [(obj.x, obj.y) for obj in objects]
         kd_tree = KDTree(target_coords)
 
@@ -222,6 +228,21 @@ def simulate_game():
 
         image = draw_objects(objects)
         image_container.image(image, channels="BGR", use_column_width=True)
+
+        end_time = time.time()
+        frame_time = end_time - start_time
+        sleep_time = max(1.0 / desired_fps - frame_time, 0)
+        time.sleep(sleep_time)
+
+        # Calculate total time including sleep
+        total_time = time.time() - start_time
+        fps = 1.0 / total_time
+
+        # Display FPS
+        current_time = time.time()
+        if current_time - last_time >= 1:  # Update FPS value every second
+            fps_placeholder.text(f"Current FPS: {fps:.2f}")  # Update placeholder with the latest FPS value
+            last_time = current_time
 
 
 def game():
