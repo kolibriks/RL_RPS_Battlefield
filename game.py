@@ -169,9 +169,22 @@ def move_objects(objects, movement_mode, kd_tree):
             advanced_hunter_move_mode(obj1, kd_tree, objects)
 
 
-def interact_objects(objects, transform_mode):
+def repel_same_type_objects(obj1, kd_tree, objects):
+    # Find objects that are too close and of the same type
+    dists, indices = kd_tree.query((obj1.x, obj1.y), k=len(objects))
+    for dist, index in zip(dists, indices):
+        obj2 = objects[index]
+        if obj1.type == obj2.type and dist < OBJECT_SIZE:  # Using OBJECT_SIZE as the "too close" threshold
+            dx = np.sign(obj1.x - obj2.x)
+            dy = np.sign(obj1.y - obj2.y)
+            obj1.move(dx, dy)
+            obj2.move(-dx, -dy)  # Move the second object in the opposite direction
+
+
+def interact_objects(objects, transform_mode, kd_tree):
     objects_to_remove = {}
     for obj1 in objects:
+        repel_same_type_objects(obj1, kd_tree, objects)  # Repel objects of the same type
         for obj2 in objects:
             if obj1 != obj2 and obj1.iou(obj2) > 0.3:
                 eaten_obj = obj1.interact_with(obj2)
@@ -205,7 +218,7 @@ def simulate_game():
         kd_tree = KDTree(target_coords)
 
         move_objects(objects, movement_mode, kd_tree)
-        interact_objects(objects, transform_mode)
+        interact_objects(objects, transform_mode, kd_tree)
 
         image = draw_objects(objects)
         image_container.image(image, channels="BGR", use_column_width=True)
