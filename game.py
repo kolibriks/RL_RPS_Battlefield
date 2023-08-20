@@ -47,6 +47,33 @@ class GameObject:
         return None  # No interaction
 
 
+class FPSCounter:
+    def __init__(self, desired_fps, duration=10):
+        self.frame_times = []
+        self.duration = duration
+        self.desired_frame_time = 1.0 / desired_fps
+
+    def precise_sleep(self, loop_time):
+        """Sleeps the exact amount of time necessary to cap the frame rate."""
+        target_end_time = time.time() + (self.desired_frame_time - loop_time)
+        while time.time() < target_end_time:
+            pass
+
+    def add_frame(self):
+        current_time = time.time()
+        self.frame_times.append(current_time)
+
+        # Remove frame times older than the duration
+        while self.frame_times and self.frame_times[0] < current_time - self.duration:
+            self.frame_times.pop(0)
+
+    def get_fps(self):
+        if len(self.frame_times) < 2:
+            return 0
+        elapsed_time = self.frame_times[-1] - self.frame_times[0]
+        return (len(self.frame_times) - 1) / elapsed_time
+
+
 def create_objects():
     """Create a board with random objects."""
     x_coords = np.random.randint(OBJECT_SIZE, WIDTH - OBJECT_SIZE, len(symbols) * NUM_OBJECTS)
@@ -204,7 +231,6 @@ def simulate_game():
     image_container = st.empty()
     fps_placeholder = st.empty()
     fps_placeholder.text(f"Current FPS: 0.00")
-    last_time = time.time()
 
     session_state = st.session_state
     session_state.running = False
@@ -218,6 +244,8 @@ def simulate_game():
     if st.button("Stop"):
         session_state.running = False
 
+    fps_counter = FPSCounter(desired_fps)
+
     while session_state.running:
         start_time = time.time()
         target_coords = [(obj.x, obj.y) for obj in objects]
@@ -229,20 +257,13 @@ def simulate_game():
         image = draw_objects(objects)
         image_container.image(image, channels="BGR", use_column_width=True)
 
-        end_time = time.time()
-        frame_time = end_time - start_time
-        sleep_time = max(1.0 / desired_fps - frame_time, 0)
-        time.sleep(sleep_time)
+        loop_time = time.time() - start_time
 
-        # Calculate total time including sleep
-        total_time = time.time() - start_time
-        fps = 1.0 / total_time
-
-        # Display FPS
-        current_time = time.time()
-        if current_time - last_time >= 1:  # Update FPS value every second
-            fps_placeholder.text(f"Current FPS: {fps:.2f}")  # Update placeholder with the latest FPS value
-            last_time = current_time
+        # Calculate and control FPS
+        fps_counter.add_frame()
+        average_fps = fps_counter.get_fps()
+        fps_placeholder.text(f"Current FPS: {average_fps:.2f}")  # Update placeholder with the average FPS value
+        fps_counter.precise_sleep(loop_time)
 
 
 def game():
