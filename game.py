@@ -94,6 +94,97 @@ def safe_move_direction(obj1, kd_tree, objects, banned_directions=None):
     return 0, 0  # If no safe move, don't move
 
 
+def random_move_mode(obj1):
+    obj1.move(np.random.randint(-1, 2), np.random.randint(-1, 2))
+
+
+def hunter_move_mode(obj1, kd_tree, objects):
+    dists, indices = kd_tree.query((obj1.x, obj1.y), k=len(objects))
+    dist_kill = np.inf
+    closest_target_to_kill = None
+
+    for dist, index in zip(dists, indices):
+        obj2 = objects[index]
+        if obj2 != obj1:
+            if obj2.type == interaction_dict[obj1.type] and dist < dist_kill:
+                dist_kill = dist
+                closest_target_to_kill = obj2
+
+    if closest_target_to_kill:
+        dy = np.sign(closest_target_to_kill.y - obj1.y)
+        dx = np.sign(closest_target_to_kill.x - obj1.x)
+        obj1.move(dx, dy)
+
+
+def advanced_hunter_move_mode(obj1, kd_tree, objects):
+    dists, indices = kd_tree.query((obj1.x, obj1.y), k=len(objects))
+    dist_kill, dist_avoid = np.inf, np.inf
+    closest_target_to_kill = None
+    closest_target_to_avoid = None
+
+    for dist, index in zip(dists, indices):
+        obj2 = objects[index]
+        if obj2 != obj1:
+            if obj2.type == interaction_dict[obj1.type] and dist < dist_kill:
+                dist_kill = dist
+                closest_target_to_kill = obj2
+            elif interaction_dict[obj2.type] == obj1.type and dist < dist_avoid:
+                dist_avoid = dist
+                closest_target_to_avoid = obj2
+
+    if dist_kill < dist_avoid or (dist_kill == dist_avoid and dist_kill < np.inf):
+        dy = np.sign(closest_target_to_kill.y - obj1.y)
+        dx = np.sign(closest_target_to_kill.x - obj1.x)
+    elif dist_avoid < np.inf:
+        dy = -np.sign(closest_target_to_avoid.y - obj1.y)
+        dx = -np.sign(closest_target_to_avoid.x - obj1.x)
+    else:
+        dx, dy = 0, 0
+
+    # Check if the object would move into a wall, and if so, try to move in a different direction
+    new_x = obj1.x + dx
+    new_y = obj1.y + dy
+    near_left_wall, near_right_wall, near_top_wall, near_bottom_wall = is_near_wall(new_x, new_y)
+    if near_left_wall or near_right_wall or near_top_wall or near_bottom_wall:
+        banned_directions = []
+        if near_left_wall:
+            banned_directions.append((-1, 0))
+        if near_right_wall:
+            banned_directions.append((1, 0))
+        if near_top_wall:
+            banned_directions.append((0, -1))
+        if near_bottom_wall:
+            banned_directions.append((0, 1))
+        dx, dy = safe_move_direction(obj1, kd_tree, objects, banned_directions)
+    obj1.move(dx, dy)
+
+
+def move_objects(objects, movement_mode, kd_tree):
+    for obj1 in objects:
+        if movement_mode == "Random Mode":
+            random_move_mode(obj1)
+        elif movement_mode == "Hunter Mode":
+            hunter_move_mode(obj1, kd_tree, objects)
+        elif movement_mode == "Advanced Hunter Mode":
+            advanced_hunter_move_mode(obj1, kd_tree, objects)
+
+
+def interact_objects(objects, transform_mode):
+    objects_to_remove = {}
+    for obj1 in objects:
+        for obj2 in objects:
+            if obj1 != obj2 and obj1.iou(obj2) > 0.3:
+                eaten_obj = obj1.interact_with(obj2)
+                if eaten_obj:
+                    objects_to_remove[eaten_obj] = obj1.type
+    for obj in objects_to_remove.keys():
+        if transform_mode:
+            obj.type = objects_to_remove[obj]
+            obj.image = image_dict[obj.type]
+        else:
+            objects.remove(obj)
+
+
 def simulate_game():
     objects = create_objects()
     image_container = st.empty()
@@ -110,72 +201,12 @@ def simulate_game():
         session_state.running = False
 
     while session_state.running:
-        objects_to_remove = {}
         target_coords = [(obj.x, obj.y) for obj in objects]
-        kd_tree = KDTree(target_coords)  # Build KD-tree for all objects
-        for obj1 in objects:
-            if movement_mode == "Random Mode":
-                obj1.move(np.random.randint(-1, 2), np.random.randint(-1, 2))
-            else:
-                dists, indices = kd_tree.query((obj1.x, obj1.y), k=len(objects))  # Find distances to all objects
-                dist_kill, dist_avoid = np.inf, np.inf
-                closest_target_to_kill = None
-                closest_target_to_avoid = None
+        kd_tree = KDTree(target_coords)
 
-                for dist, index in zip(dists, indices):
-                    obj2 = objects[index]
-                    if obj2 != obj1:
-                        if obj2.type == interaction_dict[obj1.type] and dist < dist_kill:
-                            dist_kill = dist
-                            closest_target_to_kill = obj2
-                        elif interaction_dict[obj2.type] == obj1.type and dist < dist_avoid:
-                            dist_avoid = dist
-                            closest_target_to_avoid = obj2
+        move_objects(objects, movement_mode, kd_tree)
+        interact_objects(objects, transform_mode)
 
-                if movement_mode == "Hunter Mode":
-                    if closest_target_to_kill:
-                        dy = np.sign(closest_target_to_kill.y - obj1.y)
-                        dx = np.sign(closest_target_to_kill.x - obj1.x)
-                        obj1.move(dx, dy)
-                elif movement_mode == "Advanced Hunter Mode":
-                    if dist_kill < dist_avoid or (dist_kill == dist_avoid and dist_kill < np.inf):
-                        dy = np.sign(closest_target_to_kill.y - obj1.y)
-                        dx = np.sign(closest_target_to_kill.x - obj1.x)
-                    elif dist_avoid < np.inf:
-                        dy = -np.sign(closest_target_to_avoid.y - obj1.y)
-                        dx = -np.sign(closest_target_to_avoid.x - obj1.x)
-                    else:
-                        dx, dy = 0, 0
-
-                    # Check if the object would move into a wall, and if so, try to move in a different direction
-                    new_x = obj1.x + dx
-                    new_y = obj1.y + dy
-                    near_left_wall, near_right_wall, near_top_wall, near_bottom_wall = is_near_wall(new_x, new_y)
-                    if near_left_wall or near_right_wall or near_top_wall or near_bottom_wall:
-                        banned_directions = []
-                        if near_left_wall:
-                            banned_directions.append((-1, 0))
-                        if near_right_wall:
-                            banned_directions.append((1, 0))
-                        if near_top_wall:
-                            banned_directions.append((0, -1))
-                        if near_bottom_wall:
-                            banned_directions.append((0, 1))
-                        dx, dy = safe_move_direction(obj1, kd_tree, objects, banned_directions)
-                    obj1.move(dx, dy)
-
-            # check if objects are close enough to interact
-            for obj2 in objects:
-                if obj1 != obj2 and obj1.iou(obj2) > 0.3:
-                    eaten_obj = obj1.interact_with(obj2)
-                    if eaten_obj:
-                        objects_to_remove[eaten_obj] = obj1.type
-        for obj in objects_to_remove.keys():
-            if transform_mode:
-                obj.type = objects_to_remove[obj]
-                obj.image = image_dict[obj.type]
-            else:
-                objects.remove(obj)
         image = draw_objects(objects)
         image_container.image(image, channels="BGR", use_column_width=True)
 
